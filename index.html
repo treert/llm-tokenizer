@@ -340,6 +340,7 @@
             <div class="model-selector">
                 <button class="model-btn active" data-model="ds-v4">DeepSeek-V4</button>
                 <button class="model-btn" data-model="ds-v3">DeepSeek-V3</button>
+                <button class="model-btn" data-model="nllb-200">NLLB-200</button>
                 <div class="file-input-wrapper">
                     <input type="file" id="tokenizerFile" class="file-input" accept=".json">
                     <label for="tokenizerFile" class="file-btn">📁 加载自定义 Tokenizer</label>
@@ -393,7 +394,7 @@
         let currentTokenizer = null;
         let currentModel = 'ds-v4';
 
-        // ============ GPT-2 / DeepSeek Byte-Level BPE Tokenizer ============
+        // ============ Byte-Level BPE 字节映射表（仅 ByteLevel 分词器使用） ============
         
         function buildBytesToUnicode() {
             // 构建 bytes[0..255] → unicode 正向映射（与 Python 版一致）
@@ -423,13 +424,20 @@
 
         const { byteToUni, uniToByte } = buildBytesToUnicode();
 
-        function textEncoder() { return new TextEncoder(); }
+        // ============ Tokenizer 类（自动适配 ByteLevel / Metaspace BPE） ============
 
         class BPETokenizer {
             constructor(data) {
                 this.vocab = data.model?.vocab || {};
                 this.merges = data.model?.merges || [];
                 this.specialTokens = data.added_tokens || [];
+                this.byteLevel = (data.decoder?.type === 'ByteLevel');
+                
+                // Metaspace 配置（NLLB-200 等 SentencePiece 风格）
+                if (data.pre_tokenizer?.type === 'Metaspace') {
+                    this.metaspaceReplacement = data.pre_tokenizer.replacement || '▁';
+                    this.addPrefixSpace = data.pre_tokenizer.add_prefix_space || false;
+                }
                 
                 // id → token string
                 this.idToToken = {};
@@ -446,9 +454,45 @@
                 for (let i = 0; i < this.merges.length; i++) {
                     this.mergeRank[this.merges[i]] = i;
                 }
+                
+                // 预构建特殊 token 排序列表（最长匹配优先）
+                this._specialMap = [];
+                for (const st of this.specialTokens) {
+                    this._specialMap.push({ content: st.content, id: st.id, len: st.content.length });
+                }
+                this._specialMap.sort((a, b) => b.len - a.len);
             }
 
-            // 将 UTF-8 字节序列编码为 unicode 表示
+            // ---- BPE 核心算法（支持字符串或字符数组输入） ----
+            bpe(symbols) {
+                if (typeof symbols === 'string') {
+                    symbols = [...symbols];
+                }
+                if (symbols.length <= 1) {
+                    const merged = symbols[0];
+                    if (this.vocab[merged] !== undefined) return [merged];
+                    return [];
+                }
+                let word = symbols.slice();
+                while (word.length > 1) {
+                    let minRank = Infinity;
+                    let bestIdx = -1;
+                    for (let i = 0; i < word.length - 1; i++) {
+                        const pair = word[i] + ' ' + word[i + 1];
+                        const rank = this.mergeRank[pair];
+                        if (rank !== undefined && rank < minRank) {
+                            minRank = rank;
+                            bestIdx = i;
+                        }
+                    }
+                    if (bestIdx === -1) break;
+                    word[bestIdx] = word[bestIdx] + word[bestIdx + 1];
+                    word.splice(bestIdx + 1, 1);
+                }
+                return word;
+            }
+
+            // ---- Byte-Level: UTF-8 字节 → unicode 字符串 ----
             bytesToUnicodeStr(bytes) {
                 let result = '';
                 for (const b of bytes) {
@@ -457,8 +501,8 @@
                 return result;
             }
 
-            // 将 unicode 表示的 token 解码回原始字节，再 UTF-8 解码为文本
-            decodeToken(tokenStr) {
+            // ---- Byte-Level: 将 unicode token 字符串解码为原始文本 ----
+            decodeTokenByteLevel(tokenStr) {
                 const bytes = [];
                 for (const ch of tokenStr) {
                     const code = ch.codePointAt(0);
@@ -470,9 +514,17 @@
                 return new TextDecoder('utf-8', { fatal: false }).decode(new Uint8Array(bytes));
             }
 
-            // GPT-2 风格预分词正则（按照 GPT-2 / DeepSeek 的 pre_tokenizer）
+            // ---- 通用: 将 token 字符串解码为可读文本 ----
+            decodeToken(tokenStr) {
+                if (this.byteLevel) {
+                    return this.decodeTokenByteLevel(tokenStr);
+                }
+                // Metaspace 等非 ByteLevel：▁ → 空格
+                return tokenStr.replace(/▁/g, ' ');
+            }
+
+            // GPT-2 风格预分词正则（仅 ByteLevel 分词器使用）
             static get pat() {
-                // 匹配: 字母数字+缩写 's 't 're ...  | 非空白非字母数字 | 空白
                 if (!this._pat) {
                     this._pat = new RegExp(
                         "'s|'t|'re|'ve|'m|'ll|'d| ?\\p{L}+| ?\\p{N}+| ?[^\\s\\p{L}\\p{N}]+|\\s+(?!\\S)|\\s+",
@@ -482,68 +534,24 @@
                 return this._pat;
             }
 
-            bpe(wordChars) {
-                // wordChars: unicode 字符串（已经是 byte-level 编码的）
-                const symbols = [...wordChars];
-                if (symbols.length <= 1) {
-                    // 单个字符：直接查词表
-                    const merged = symbols[0];
-                    if (this.vocab[merged] !== undefined) return [merged];
-                    return [];
-                }
-
-                // 将 symbols 转为数组，每个元素是一个 char
-                let word = symbols.slice();
-
-                while (word.length > 1) {
-                    // 找到 rank 最小的相邻 pair
-                    let minRank = Infinity;
-                    let bestIdx = -1;
-                    
-                    for (let i = 0; i < word.length - 1; i++) {
-                        const pair = word[i] + ' ' + word[i + 1];
-                        const rank = this.mergeRank[pair];
-                        if (rank !== undefined && rank < minRank) {
-                            minRank = rank;
-                            bestIdx = i;
-                        }
+            // 检查并处理特殊 token
+            _matchSpecial(remaining) {
+                for (const sp of this._specialMap) {
+                    if (remaining.startsWith(sp.content)) {
+                        return sp;
                     }
-                    
-                    if (bestIdx === -1) break;  // 没有可合并的 pair
-                    
-                    // 合并
-                    word[bestIdx] = word[bestIdx] + word[bestIdx + 1];
-                    word.splice(bestIdx + 1, 1);
                 }
-                
-                return word;  // 返回 BPE token 列表（unicode 表示）
+                return null;
             }
 
-            encode(text) {
+            // ---- Byte-Level BPE 编码 ----
+            encodeByteLevel(text) {
                 const tokens = [];
                 const ids = [];
-                
-                // 1. 匹配特殊 token
-                const specialMap = [];
-                for (const st of this.specialTokens) {
-                    specialMap.push({ content: st.content, id: st.id, len: st.content.length });
-                }
-                specialMap.sort((a, b) => b.len - a.len);  // 最长匹配优先
-                
                 let remaining = text;
-                let offset = 0;
                 
-                // 2. 对剩余文本使用 GPT-2 预分词 regex
                 while (remaining.length > 0) {
-                    // 检查特殊 token
-                    let matchedSpecial = null;
-                    for (const sp of specialMap) {
-                        if (remaining.startsWith(sp.content)) {
-                            matchedSpecial = sp;
-                            break;
-                        }
-                    }
-                    
+                    const matchedSpecial = this._matchSpecial(remaining);
                     if (matchedSpecial) {
                         tokens.push(matchedSpecial.content);
                         ids.push(matchedSpecial.id);
@@ -551,17 +559,13 @@
                         continue;
                     }
                     
-                    // 对剩余文本取第一段进行 regex 分词
                     BPETokenizer.pat.lastIndex = 0;
                     const match = BPETokenizer.pat.exec(remaining);
                     
                     if (match) {
                         const word = match[0];
-                        // 将 word 转为 UTF-8 字节，再映射为 unicode 字符串
-                        const wordBytes = textEncoder().encode(word);
+                        const wordBytes = new TextEncoder().encode(word);
                         const wordUnicode = this.bytesToUnicodeStr(wordBytes);
-                        
-                        // BPE 合并
                         const bpeTokens = this.bpe(wordUnicode);
                         
                         for (const bt of bpeTokens) {
@@ -569,15 +573,70 @@
                             tokens.push(bt);
                             ids.push(id !== undefined ? id : 0);
                         }
-                        
                         remaining = remaining.substring(word.length);
                     } else {
-                        // regex 匹配失败，后退
                         remaining = remaining.substring(1);
                     }
                 }
-                
                 return { tokens, ids };
+            }
+
+            // ---- Metaspace BPE 编码（NLLB-200 等 SentencePiece 风格） ----
+            encodeMetaspace(text) {
+                const tokens = [];
+                const ids = [];
+                
+                // 1. 空格 → ▁
+                let processed = text;
+                if (this.addPrefixSpace) {
+                    processed = '▁' + processed;
+                }
+                processed = processed.replace(/ /g, this.metaspaceReplacement || '▁');
+                
+                // 2. 按 ▁ 边界分片，每片分别做 BPE
+                let remaining = processed;
+                
+                while (remaining.length > 0) {
+                    const matchedSpecial = this._matchSpecial(remaining);
+                    if (matchedSpecial) {
+                        tokens.push(matchedSpecial.content);
+                        ids.push(matchedSpecial.id);
+                        remaining = remaining.substring(matchedSpecial.len);
+                        continue;
+                    }
+                    
+                    // 找到下一个 ▁ 边界（跳过位置 0 的 ▁）
+                    const nextMeta = remaining.indexOf('▁', 1);
+                    let piece;
+                    if (nextMeta === -1) {
+                        piece = remaining;
+                        remaining = '';
+                    } else {
+                        piece = remaining.substring(0, nextMeta);
+                        remaining = remaining.substring(nextMeta);
+                    }
+                    
+                    if (piece.length === 0) {
+                        remaining = remaining.substring(1);
+                        continue;
+                    }
+                    
+                    const bpeTokens = this.bpe([...piece]);
+                    for (const bt of bpeTokens) {
+                        const id = this.vocab[bt];
+                        tokens.push(bt);
+                        ids.push(id !== undefined ? id : 0);
+                    }
+                }
+                return { tokens, ids };
+            }
+
+            // ---- 统一入口 ----
+            encode(text) {
+                if (this.byteLevel) {
+                    return this.encodeByteLevel(text);
+                }
+                return this.encodeMetaspace(text);
             }
         }
 

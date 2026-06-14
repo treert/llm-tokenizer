@@ -24,7 +24,9 @@ for model in model_dirs:
             'vocab': data['model']['vocab'],
             'merges': data['model']['merges']
         },
-        'added_tokens': data.get('added_tokens', [])
+        'added_tokens': data.get('added_tokens', []),
+        'decoder': data.get('decoder', {}),
+        'pre_tokenizer': data.get('pre_tokenizer', {})
     }
 
     with open(js_path, 'w', encoding='utf-8') as f:

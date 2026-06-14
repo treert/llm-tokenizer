@@ -89,8 +89,13 @@ def _is_byte_level(tokenizer):
 
 def bpe_token_to_text(token_str):
     """将单个 GPT-2 风格 byte-level token 字符串还原为可读文本"""
-    byte_list = [_BYTE_DECODER[ord(ch)] for ch in token_str]
-    return bytes(byte_list).decode("utf-8", errors="replace")
+    try:
+        byte_list = [_BYTE_DECODER[ord(ch)] for ch in token_str]
+        return bytes(byte_list).decode("utf-8", errors="replace")
+    except KeyError:
+        # 特殊标记（如 <｜User｜>）中的字符不在 byte-level 映射表内，
+        # 直接返回原始 token 字符串
+        return token_str
 
 
 def metaspace_token_to_text(token_str):

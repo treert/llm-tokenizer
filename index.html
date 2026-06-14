@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLM Tokenizer 工具</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            color: white;
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .header p {
+            color: rgba(255,255,255,0.9);
+            font-size: 1.1rem;
+        }
+
+        .card {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            padding: 24px;
+            margin-bottom: 20px;
+        }
+
+        .model-selector {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .model-btn {
+            padding: 8px 16px;
+            border: 2px solid #e0e0e0;
+            background: white;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 14px;
+        }
+
+        .model-btn:hover {
+            border-color: #667eea;
+            color: #667eea;
+        }
+
+        .model-btn.active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .file-input-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        .file-btn {
+            padding: 8px 16px;
+            background: #f5f5f5;
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 14px;
+            color: #666;
+        }
+
+        .file-btn:hover {
+            border-color: #667eea;
+            color: #667eea;
+        }
+
+        .file-name {
+            font-size: 13px;
+            color: #666;
+        }
+
+        .status {
+            font-size: 13px;
+            padding: 6px 12px;
+            border-radius: 6px;
+            margin-left: auto;
+        }
+
+        .status.ready {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+
+        .status.loading {
+            background: #fff3e0;
+            color: #ef6c00;
+        }
+
+        .status.error {
+            background: #ffebee;
+            color: #c62828;
+        }
+
+        .input-area {
+            position: relative;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 150px;
+            padding: 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 12px;
+            font-size: 16px;
+            line-height: 1.6;
+            resize: vertical;
+            transition: border-color 0.3s;
+            font-family: inherit;
+        }
+
+        textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .quick-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 12px;
+        }
+
+        .quick-btn {
+            padding: 6px 14px;
+            background: #f5f5f5;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            color: #555;
+            transition: all 0.3s;
+        }
+
+        .quick-btn:hover {
+            background: #e0e0e0;
+        }
+
+        .stats-bar {
+            display: flex;
+            gap: 30px;
+            margin: 20px 0;
+            padding: 16px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 12px;
+            color: white;
+        }
+
+        .stat-item {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            opacity: 0.9;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .stat-value {
+            font-size: 28px;
+            font-weight: bold;
+            margin-top: 4px;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 16px;
+            background: #f5f5f5;
+            padding: 4px;
+            border-radius: 10px;
+            width: fit-content;
+        }
+
+        .tab {
+            padding: 8px 20px;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            border-radius: 8px;
+            font-size: 14px;
+            color: #666;
+            transition: all 0.3s;
+        }
+
+        .tab.active {
+            background: white;
+            color: #333;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .result-area {
+            min-height: 100px;
+            padding: 16px;
+            background: #f8f9fa;
+            border-radius: 12px;
+            line-height: 2;
+            word-wrap: break-word;
+        }
+
+        .token {
+            display: inline;
+            padding: 2px 4px;
+            margin: 1px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+            position: relative;
+        }
+
+        .token:hover {
+            filter: brightness(0.9);
+            transform: scale(1.05);
+        }
+
+        .token-hl-0 { background: #ff6b6b; color: white; }
+        .token-hl-1 { background: #4ecdc4; color: white; }
+        .token-hl-2 { background: #45b7d1; color: white; }
+        .token-hl-3 { background: #96ceb4; color: white; }
+        .token-hl-4 { background: #ffeaa7; color: #333; }
+        .token-hl-5 { background: #dfe6e9; color: #333; }
+        .token-hl-6 { background: #fd79a8; color: white; }
+        .token-hl-7 { background: #a29bfe; color: white; }
+        .token-hl-8 { background: #00b894; color: white; }
+        .token-hl-9 { background: #e17055; color: white; }
+
+        .token-ids {
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 13px;
+            line-height: 1.8;
+        }
+
+        .token-id-item {
+            display: inline-block;
+            padding: 4px 8px;
+            margin: 2px;
+            background: white;
+            border-radius: 6px;
+            border: 1px solid #e0e0e0;
+        }
+
+        .empty-state {
+            text-align: center;
+            color: #999;
+            padding: 40px;
+        }
+
+        .empty-state svg {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        .tooltip {
+            position: fixed;
+            background: #333;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            pointer-events: none;
+            z-index: 1000;
+            max-width: 300px;
+            word-break: break-all;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+
+        .tooltip::after {
+            content: '';
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            margin-left: -5px;
+            border: 5px solid transparent;
+            border-top-color: #333;
+        }
+
+        @media (max-width: 600px) {
+            .header h1 {
+                font-size: 1.8rem;
+            }
+            .stats-bar {
+                flex-direction: column;
+                gap: 10px;
+            }
+            .stat-value {
+                font-size: 24px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔤 LLM Tokenizer</h1>
+            <p>在浏览器中计算和可视化文本 Token，支持多种模型</p>
+        </div>
+
+        <div class="card">
+            <div class="model-selector">
+                <button class="model-btn active" data-model="ds-v4">DeepSeek-V4</button>
+                <button class="model-btn" data-model="ds-v3">DeepSeek-V3</button>
+                <div class="file-input-wrapper">
+                    <input type="file" id="tokenizerFile" class="file-input" accept=".json">
+                    <label for="tokenizerFile" class="file-btn">📁 加载自定义 Tokenizer</label>
+                    <span class="file-name" id="fileName"></span>
+                </div>
+                <span class="status ready" id="status">就绪</span>
+            </div>
+
+            <div class="input-area">
+                <textarea id="inputText" placeholder="在此输入文本...&#10;支持实时分词和 Token 可视化"></textarea>
+                <div class="quick-actions">
+                    <button class="quick-btn" onclick="clearText()">🗑️ 清空</button>
+                    <button class="quick-btn" onclick="loadExample()">💡 举个例子</button>
+                    <button class="quick-btn" onclick="pasteClipboard()">📋 粘贴</button>
+                </div>
+            </div>
+
+            <div class="stats-bar">
+                <div class="stat-item">
+                    <span class="stat-label">词数量 (Tokens)</span>
+                    <span class="stat-value" id="tokenCount">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">字符数量 (Characters)</span>
+                    <span class="stat-value" id="charCount">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Token/字符比</span>
+                    <span class="stat-value" id="ratio">-</span>
+                </div>
+            </div>
+
+            <div class="tabs">
+                <button class="tab active" data-tab="text">TEXT</button>
+                <button class="tab" data-tab="ids">TOKEN IDS</button>
+            </div>
+
+            <div class="result-area" id="resultArea">
+                <div class="empty-state">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+                    </svg>
+                    <p>输入文本开始分词</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Tokenizer 数据存储
+        let currentTokenizer = null;
+        let currentModel = 'ds-v4';
+
+        // ============ GPT-2 / DeepSeek Byte-Level BPE Tokenizer ============
+        
+        function buildBytesToUnicode() {
+            // 构建 bytes[0..255] → unicode 正向映射（与 Python 版一致）
+            const bs = [];
+            const cs = [];
+            // 可打印区间直接映射
+            for (let i = 33; i <= 126; i++)  { bs.push(i); cs.push(i); }  // !...~
+            for (let i = 161; i <= 172; i++) { bs.push(i); cs.push(i); }  // ¡...¬
+            for (let i = 174; i <= 255; i++) { bs.push(i); cs.push(i); }  // ®...ÿ
+            // 不可打印字节映射到 U+0100 往后
+            let n = 0;
+            for (let b = 0; b < 256; b++) {
+                if (!bs.includes(b)) {
+                    bs.push(b);
+                    cs.push(256 + n);
+                    n++;
+                }
+            }
+            const byteToUni = {};  // byte → unicode char
+            const uniToByte = {};  // unicode codepoint → byte
+            for (let i = 0; i < 256; i++) {
+                byteToUni[bs[i]] = String.fromCharCode(cs[i]);
+                uniToByte[cs[i]] = bs[i];
+            }
+            return { byteToUni, uniToByte };
+        }
+
+        const { byteToUni, uniToByte } = buildBytesToUnicode();
+
+        function textEncoder() { return new TextEncoder(); }
+
+        class BPETokenizer {
+            constructor(data) {
+                this.vocab = data.model?.vocab || {};
+                this.merges = data.model?.merges || [];
+                this.specialTokens = data.added_tokens || [];
+                
+                // id → token string
+                this.idToToken = {};
+                for (const [token, id] of Object.entries(this.vocab)) {
+                    this.idToToken[id] = token;
+                }
+                for (const st of this.specialTokens) {
+                    this.vocab[st.content] = st.id;
+                    this.idToToken[st.id] = st.content;
+                }
+                
+                // merge 优先级表: "a b" → rank (越小越优先)
+                this.mergeRank = {};
+                for (let i = 0; i < this.merges.length; i++) {
+                    this.mergeRank[this.merges[i]] = i;
+                }
+            }
+
+            // 将 UTF-8 字节序列编码为 unicode 表示
+            bytesToUnicodeStr(bytes) {
+                let result = '';
+                for (const b of bytes) {
+                    result += byteToUni[b];
+                }
+                return result;
+            }
+
+            // 将 unicode 表示的 token 解码回原始字节，再 UTF-8 解码为文本
+            decodeToken(tokenStr) {
+                const bytes = [];
+                for (const ch of tokenStr) {
+                    const code = ch.codePointAt(0);
+                    if (uniToByte[code] !== undefined) {
+                        bytes.push(uniToByte[code]);
+                    }
+                }
+                if (bytes.length === 0) return tokenStr;
+                return new TextDecoder('utf-8', { fatal: false }).decode(new Uint8Array(bytes));
+            }
+
+            // GPT-2 风格预分词正则（按照 GPT-2 / DeepSeek 的 pre_tokenizer）
+            static get pat() {
+                // 匹配: 字母数字+缩写 's 't 're ...  | 非空白非字母数字 | 空白
+                if (!this._pat) {
+                    this._pat = new RegExp(
+                        "'s|'t|'re|'ve|'m|'ll|'d| ?\\p{L}+| ?\\p{N}+| ?[^\\s\\p{L}\\p{N}]+|\\s+(?!\\S)|\\s+",
+                        'gu'
+                    );
+                }
+                return this._pat;
+            }
+
+            bpe(wordChars) {
+                // wordChars: unicode 字符串（已经是 byte-level 编码的）
+                const symbols = [...wordChars];
+                if (symbols.length <= 1) {
+                    // 单个字符：直接查词表
+                    const merged = symbols[0];
+                    if (this.vocab[merged] !== undefined) return [merged];
+                    return [];
+                }
+
+                // 将 symbols 转为数组，每个元素是一个 char
+                let word = symbols.slice();
+
+                while (word.length > 1) {
+                    // 找到 rank 最小的相邻 pair
+                    let minRank = Infinity;
+                    let bestIdx = -1;
+                    
+                    for (let i = 0; i < word.length - 1; i++) {
+                        const pair = word[i] + ' ' + word[i + 1];
+                        const rank = this.mergeRank[pair];
+                        if (rank !== undefined && rank < minRank) {
+                            minRank = rank;
+                            bestIdx = i;
+                        }
+                    }
+                    
+                    if (bestIdx === -1) break;  // 没有可合并的 pair
+                    
+                    // 合并
+                    word[bestIdx] = word[bestIdx] + word[bestIdx + 1];
+                    word.splice(bestIdx + 1, 1);
+                }
+                
+                return word;  // 返回 BPE token 列表（unicode 表示）
+            }
+
+            encode(text) {
+                const tokens = [];
+                const ids = [];
+                
+                // 1. 匹配特殊 token
+                const specialMap = [];
+                for (const st of this.specialTokens) {
+                    specialMap.push({ content: st.content, id: st.id, len: st.content.length });
+                }
+                specialMap.sort((a, b) => b.len - a.len);  // 最长匹配优先
+                
+                let remaining = text;
+                let offset = 0;
+                
+                // 2. 对剩余文本使用 GPT-2 预分词 regex
+                while (remaining.length > 0) {
+                    // 检查特殊 token
+                    let matchedSpecial = null;
+                    for (const sp of specialMap) {
+                        if (remaining.startsWith(sp.content)) {
+                            matchedSpecial = sp;
+                            break;
+                        }
+                    }
+                    
+                    if (matchedSpecial) {
+                        tokens.push(matchedSpecial.content);
+                        ids.push(matchedSpecial.id);
+                        remaining = remaining.substring(matchedSpecial.len);
+                        continue;
+                    }
+                    
+                    // 对剩余文本取第一段进行 regex 分词
+                    BPETokenizer.pat.lastIndex = 0;
+                    const match = BPETokenizer.pat.exec(remaining);
+                    
+                    if (match) {
+                        const word = match[0];
+                        // 将 word 转为 UTF-8 字节，再映射为 unicode 字符串
+                        const wordBytes = textEncoder().encode(word);
+                        const wordUnicode = this.bytesToUnicodeStr(wordBytes);
+                        
+                        // BPE 合并
+                        const bpeTokens = this.bpe(wordUnicode);
+                        
+                        for (const bt of bpeTokens) {
+                            const id = this.vocab[bt];
+                            tokens.push(bt);
+                            ids.push(id !== undefined ? id : 0);
+                        }
+                        
+                        remaining = remaining.substring(word.length);
+                    } else {
+                        // regex 匹配失败，后退
+                        remaining = remaining.substring(1);
+                    }
+                }
+                
+                return { tokens, ids };
+            }
+        }
+
+        // 加载 tokenizer
+        async function loadTokenizer(modelName) {
+            const status = document.getElementById('status');
+            status.textContent = '加载中...';
+            status.className = 'status loading';
+            
+            try {
+                const response = await fetch(`${modelName}/tokenizer.json`);
+                if (!response.ok) throw new Error('加载失败');
+                const data = await response.json();
+                currentTokenizer = new BPETokenizer(data);
+                status.textContent = '已加载 ' + modelName;
+                status.className = 'status ready';
+                currentModel = modelName;
+                updateResult();
+            } catch (error) {
+                status.textContent = '加载失败';
+                status.className = 'status error';
+                console.error(error);
+            }
+        }
+
+        // 从文件加载 tokenizer
+        function loadTokenizerFromFile(file) {
+            const status = document.getElementById('status');
+            const fileName = document.getElementById('fileName');
+            
+            status.textContent = '加载中...';
+            status.className = 'status loading';
+            fileName.textContent = file.name;
+            
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    currentTokenizer = new BPETokenizer(data);
+                    status.textContent = '自定义模型已加载';
+                    status.className = 'status ready';
+                    
+                    // 取消预设按钮的激活状态
+                    document.querySelectorAll('.model-btn').forEach(btn => btn.classList.remove('active'));
+                    updateResult();
+                } catch (error) {
+                    status.textContent = '解析失败';
+                    status.className = 'status error';
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        // 更新结果显示
+        function updateResult() {
+            const text = document.getElementById('inputText').value;
+            const resultArea = document.getElementById('resultArea');
+            const tokenCount = document.getElementById('tokenCount');
+            const charCount = document.getElementById('charCount');
+            const ratio = document.getElementById('ratio');
+            const activeTab = document.querySelector('.tab.active').dataset.tab;
+            
+            charCount.textContent = text.length;
+            
+            if (!text || !currentTokenizer) {
+                resultArea.innerHTML = `
+                    <div class="empty-state">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+                        </svg>
+                        <p>${!currentTokenizer ? '请先加载 Tokenizer' : '输入文本开始分词'}</p>
+                    </div>
+                `;
+                tokenCount.textContent = '0';
+                ratio.textContent = '-';
+                return;
+            }
+            
+            try {
+                const encoded = currentTokenizer.encode(text);
+                tokenCount.textContent = encoded.tokens.length;
+                ratio.textContent = text.length > 0 ? (encoded.tokens.length / text.length).toFixed(2) : '-';
+                
+                if (activeTab === 'text') {
+                    // 显示带颜色高亮的文本片段
+                    let html = '';
+                    for (let i = 0; i < encoded.tokens.length; i++) {
+                        const token = encoded.tokens[i];
+                        // 特殊 token 直接显示原文
+                        let decoded;
+                        const isSpecial = currentTokenizer.specialTokens.some(st => st.content === token);
+                        if (isSpecial) {
+                            decoded = token;
+                        } else {
+                            decoded = currentTokenizer.decodeToken(token);
+                        }
+                        const colorClass = `token-hl-${i % 10}`;
+                        html += `<span class="token ${colorClass}" data-token="${escapeHtml(token)}" data-id="${encoded.ids[i]}">${escapeHtml(decoded)}</span>`;
+                    }
+                    resultArea.innerHTML = html || '<span style="color:#999">无内容</span>';
+                    
+                    // 添加 hover tooltip
+                    document.querySelectorAll('.token').forEach(el => {
+                        el.addEventListener('mouseenter', showTooltip);
+                        el.addEventListener('mouseleave', hideTooltip);
+                    });
+                } else {
+                    // 显示 Token IDs
+                    let html = '<div class="token-ids">';
+                    for (let i = 0; i < encoded.tokens.length; i++) {
+                        html += `<span class="token-id-item" style="border-left: 3px solid ${tokenColor(i % 10)}">${encoded.ids[i]}</span>`;
+                    }
+                    html += '</div>';
+                    resultArea.innerHTML = html;
+                }
+            } catch (e) {
+                resultArea.innerHTML = `<div class="empty-state"><p style="color:#c62828">分词出错: ${escapeHtml(e.message)}</p></div>`;
+            }
+        }
+
+        function tokenColor(i) {
+            const colors = ['#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4', '#ffeaa7', '#dfe6e9', '#fd79a8', '#a29bfe', '#00b894', '#e17055'];
+            return colors[i] || '#667eea';
+        }
+
+        // Tooltip
+        let tooltipEl = null;
+        function showTooltip(e) {
+            const token = e.target.dataset.token;
+            const id = e.target.dataset.id;
+            
+            if (!tooltipEl) {
+                tooltipEl = document.createElement('div');
+                tooltipEl.className = 'tooltip';
+                document.body.appendChild(tooltipEl);
+            }
+            
+            tooltipEl.innerHTML = `Token: <code>${escapeHtml(token)}</code><br>ID: ${id}`;
+            tooltipEl.style.display = 'block';
+            
+            const rect = e.target.getBoundingClientRect();
+            const left = Math.min(Math.max(rect.left + rect.width / 2 - tooltipEl.offsetWidth / 2, 10), window.innerWidth - tooltipEl.offsetWidth - 10);
+            const top = rect.top - tooltipEl.offsetHeight - 8;
+            tooltipEl.style.left = left + 'px';
+            tooltipEl.style.top = (top > 0 ? top : rect.bottom + 8) + 'px';
+        }
+
+        function hideTooltip() {
+            if (tooltipEl) tooltipEl.style.display = 'none';
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // 快捷操作
+        function clearText() {
+            document.getElementById('inputText').value = '';
+            updateResult();
+        }
+
+        function loadExample() {
+            const examples = [
+                '这是一个测试句子，用来演示 Tokenizer 的分词效果。',
+                'Hello, world! This is a test of the tokenizer.',
+                '深度学习（Deep Learning）是机器学习的一个分支。',
+                'function hello() {\n  console.log("Hello, World!");\n}',
+                '<｜User｜>你好，请介绍一下自己。<｜Assistant｜>',
+            ];
+            const example = examples[Math.floor(Math.random() * examples.length)];
+            document.getElementById('inputText').value = example;
+            updateResult();
+        }
+
+        async function pasteClipboard() {
+            try {
+                const text = await navigator.clipboard.readText();
+                document.getElementById('inputText').value = text;
+                updateResult();
+            } catch (err) {
+                alert('无法访问剪贴板，请手动粘贴');
+            }
+        }
+
+        // 事件监听
+        document.getElementById('inputText').addEventListener('input', updateResult);
+        
+        document.getElementById('tokenizerFile').addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                loadTokenizerFromFile(e.target.files[0]);
+            }
+        });
+
+        document.querySelectorAll('.model-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.model-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                loadTokenizer(btn.dataset.model);
+            });
+        });
+
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                updateResult();
+            });
+        });
+
+        // 初始化
+        loadTokenizer('ds-v4');
+    </script>
+</body>
+</html>

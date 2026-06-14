@@ -2,7 +2,7 @@
 
 通用的大语言模型分词器测试工具，支持 DeepSeek-V3、DeepSeek-V4 以及任意 GPT-2 风格 byte-level BPE 分词器。
 
-支持 **Python 命令行** 和 **网页可视化** 两种使用方式。
+支持 **Python 命令行**、**网页可视化** 和 **Node.js 测试** 三种使用方式。
 
 ---
 
@@ -10,11 +10,16 @@
 
 ```
 ├── llm_tokenizer.py      # Python 命令行工具
+├── tokenizer_engine.js   # 独立分词引擎（浏览器 / Node.js 通用）
+├── test_tokenizer.js     # Node.js 测试脚本
 ├── index.html            # 网页版可视化工具
 ├── ds-v3/                # DeepSeek-V3 分词器
 │   ├── tokenizer.json    # 完整分词器数据（供 Python 读取）
 │   └── tokenizer.js      # 精简分词器数据（供网页 file:// 模式读取）
 ├── ds-v4/                # DeepSeek-V4 分词器
+│   ├── tokenizer.json
+│   └── tokenizer.js
+├── nllb-200/             # NLLB-200 分词器（Metaspace BPE）
 │   ├── tokenizer.json
 │   └── tokenizer.js
 └── README.md
@@ -101,9 +106,31 @@ python build_tokenizer_js.py qwen
 
 ---
 
+## 方式三：Node.js 测试
+
+适用于开发调试和自动化测试，无需浏览器。
+
+```bash
+# 测试默认模型（ds-v4）
+node test_tokenizer.js
+
+# 测试指定模型
+node test_tokenizer.js ds-v4 nllb-200
+
+# 编程调用
+node -e "
+const { BPETokenizer } = require('./tokenizer_engine.js');
+const data = JSON.parse(require('fs').readFileSync('./ds-v4/tokenizer.json','utf-8'));
+const tok = new BPETokenizer(data);
+console.log(tok.encode('Hello world!'));
+"
+```
+
+---
+
 ## 技术说明
 
-- 分词算法为 GPT-2 风格的 Byte-Level BPE（字节级 BPE）
+- 分词算法为 GPT-2 风格的 Byte-Level BPE（字节级 BPE），同时支持 Metaspace BPE（如 NLLB-200）
 - 每个原始字节映射到一个可见 Unicode 字符，再通过 BPE 合并规则组合成 token
 - 特殊 token（如 `<｜User｜>`）在编码时按最长匹配优先处理
-- Python 版使用 HuggingFace `tokenizers` 库，网页版为纯 JavaScript 实现
+- Python 版使用 HuggingFace `tokenizers` 库，网页版 / Node.js 共用 `tokenizer_engine.js` 纯 JavaScript 实现

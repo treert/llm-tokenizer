@@ -581,26 +581,66 @@
             }
         }
 
-        // 加载 tokenizer
+        // 加载 tokenizer（自动处理 http:// 和 file:// 两种协议）
         async function loadTokenizer(modelName) {
             const status = document.getElementById('status');
             status.textContent = '加载中...';
             status.className = 'status loading';
             
+            let data = null;
+            
+            // 方式1：fetch（适用于 http://）
             try {
                 const response = await fetch(`${modelName}/tokenizer.json`);
-                if (!response.ok) throw new Error('加载失败');
-                const data = await response.json();
+                if (response.ok) {
+                    data = await response.json();
+                }
+            } catch (e) {
+                // fetch 失败（file:// 协议），静默回退
+            }
+            
+            // 方式2：<script> 标签加载 .js 文件（适用于 file://）
+            if (!data) {
+                try {
+                    data = await loadViaScript(modelName);
+                } catch (e) {
+                    status.textContent = '加载失败';
+                    status.className = 'status error';
+                    console.error(e);
+                    return;
+                }
+            }
+            
+            if (data) {
                 currentTokenizer = new BPETokenizer(data);
                 status.textContent = '已加载 ' + modelName;
                 status.className = 'status ready';
                 currentModel = modelName;
                 updateResult();
-            } catch (error) {
-                status.textContent = '加载失败';
-                status.className = 'status error';
-                console.error(error);
             }
+        }
+        
+        function loadViaScript(modelName) {
+            return new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = `${modelName}/tokenizer.js`;
+                const prevData = window.__TOKENIZER_DATA__;
+                delete window.__TOKENIZER_DATA__;
+                
+                script.onload = () => {
+                    const data = window.__TOKENIZER_DATA__;
+                    window.__TOKENIZER_DATA__ = prevData;
+                    script.remove();
+                    if (data) resolve(data);
+                    else reject(new Error('数据未加载'));
+                };
+                script.onerror = () => {
+                    window.__TOKENIZER_DATA__ = prevData;
+                    script.remove();
+                    reject(new Error('加载失败'));
+                };
+                document.head.appendChild(script);
+            });
         }
 
         // 从文件加载 tokenizer

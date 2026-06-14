@@ -9,13 +9,16 @@ from tokenizers import Tokenizer
 
 
 def load_tokenizer(model_dir="ds-v4"):
-    """加载指定模型目录下的 tokenizer.json"""
+    """加载指定模型目录下的 tokenizer.json，返回 (tokenizer, is_byte_level)"""
     base_dir = os.path.dirname(os.path.abspath(__file__))
     tokenizer_path = os.path.join(base_dir, model_dir, "tokenizer.json")
     if not os.path.exists(tokenizer_path):
         raise FileNotFoundError(f"找不到 tokenizer 文件: {tokenizer_path}")
-    print(f"[加载分词器] {model_dir}")
-    return Tokenizer.from_file(tokenizer_path)
+    tok = Tokenizer.from_file(tokenizer_path)
+    byte_level = _is_byte_level(tok)
+    algo_name = "Byte-Level BPE" if byte_level else "BPE"
+    print(f"[加载分词器] {model_dir}（{algo_name}）")
+    return tok, byte_level
 
 
 # --- GPT-2 风格 byte-level token → 可读文本 的转换工具 ---
@@ -75,18 +78,35 @@ def _build_byte_decoder():
 _BYTE_DECODER = _build_byte_decoder()
 
 
+def _is_byte_level(tokenizer):
+    """检测分词器是否为 ByteLevel（字节级 BPE）类型"""
+    try:
+        from tokenizers.decoders import ByteLevel
+        return isinstance(tokenizer.decoder, ByteLevel)
+    except Exception:
+        return False
+
+
 def bpe_token_to_text(token_str):
     """将单个 GPT-2 风格 byte-level token 字符串还原为可读文本"""
     byte_list = [_BYTE_DECODER[ord(ch)] for ch in token_str]
     return bytes(byte_list).decode("utf-8", errors="replace")
 
 
+def metaspace_token_to_text(token_str):
+    """将 Metaspace 风格 token 还原为可读文本，▁ 代表空格"""
+    return token_str.replace("▁", " ")
+
+
 # --- 主逻辑 ---
 
-def process_text(tokenizer, text):
+def process_text(tokenizer, text, byte_level):
     """处理并输出 token 信息"""
     encoded = tokenizer.encode(text)
-    readable_tokens = [bpe_token_to_text(t) for t in encoded.tokens]
+    if byte_level:
+        readable_tokens = [bpe_token_to_text(t) for t in encoded.tokens]
+    else:
+        readable_tokens = [metaspace_token_to_text(t) for t in encoded.tokens]
     print(f"输入:   {repr(text)}")
     print(f"Token IDs: {encoded.ids}")
     print(f"Tokens:    {encoded.tokens}")
@@ -109,7 +129,7 @@ def main():
     )
     args = parser.parse_args()
 
-    tokenizer = load_tokenizer(args.dir)
+    tokenizer, byte_level = load_tokenizer(args.dir)
 
     if not args.text:
         # 交互模式
@@ -126,10 +146,10 @@ def main():
                 break
             if not text.strip():
                 continue
-            process_text(tokenizer, text)
+            process_text(tokenizer, text, byte_level)
     else:
         text = " ".join(args.text)
-        process_text(tokenizer, text)
+        process_text(tokenizer, text, byte_level)
 
 
 if __name__ == "__main__":

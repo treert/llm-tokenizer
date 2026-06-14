@@ -545,30 +545,17 @@
                 return null;
             }
 
-            // ---- Byte-Level BPE 编码 ----
-            encodeByteLevel(text) {
-                const tokens = [];
-                const ids = [];
-                let remaining = text;
-                
+            // ---- 编码文本片段（不含特殊 token），用于 ByteLevel ---- 
+            _encodeSegmentByteLevel(segment, tokens, ids) {
+                let remaining = segment;
                 while (remaining.length > 0) {
-                    const matchedSpecial = this._matchSpecial(remaining);
-                    if (matchedSpecial) {
-                        tokens.push(matchedSpecial.content);
-                        ids.push(matchedSpecial.id);
-                        remaining = remaining.substring(matchedSpecial.len);
-                        continue;
-                    }
-                    
                     BPETokenizer.pat.lastIndex = 0;
                     const match = BPETokenizer.pat.exec(remaining);
-                    
                     if (match) {
                         const word = match[0];
                         const wordBytes = new TextEncoder().encode(word);
                         const wordUnicode = this.bytesToUnicodeStr(wordBytes);
                         const bpeTokens = this.bpe(wordUnicode);
-                        
                         for (const bt of bpeTokens) {
                             const id = this.vocab[bt];
                             tokens.push(bt);
@@ -578,6 +565,47 @@
                     } else {
                         remaining = remaining.substring(1);
                     }
+                }
+            }
+
+            // ---- Byte-Level BPE 编码 ----
+            encodeByteLevel(text) {
+                const tokens = [];
+                const ids = [];
+                let remaining = text;
+                
+                while (remaining.length > 0) {
+                    // 优先匹配开头的特殊 token
+                    const matchedSpecial = this._matchSpecial(remaining);
+                    if (matchedSpecial) {
+                        tokens.push(matchedSpecial.content);
+                        ids.push(matchedSpecial.id);
+                        remaining = remaining.substring(matchedSpecial.len);
+                        continue;
+                    }
+                    
+                    // 检查即将到来的文本中是否包含特殊 token（最长匹配优先）
+                    let nextSpecialPos = remaining.length;
+                    let nextSpecial = null;
+                    for (const sp of this._specialMap) {
+                        const pos = remaining.indexOf(sp.content);
+                        if (pos !== -1 && pos < nextSpecialPos) {
+                            nextSpecialPos = pos;
+                            nextSpecial = sp;
+                        }
+                    }
+                    
+                    // 如果下一个特殊 token 前面还有文本，先处理前面的文本
+                    if (nextSpecial && nextSpecialPos > 0) {
+                        const segment = remaining.substring(0, nextSpecialPos);
+                        this._encodeSegmentByteLevel(segment, tokens, ids);
+                        remaining = remaining.substring(nextSpecialPos);
+                        continue;
+                    }
+                    
+                    // 没有特殊 token，直接编码剩余文本
+                    this._encodeSegmentByteLevel(remaining, tokens, ids);
+                    break;
                 }
                 return { tokens, ids };
             }
@@ -603,6 +631,46 @@
                         tokens.push(matchedSpecial.content);
                         ids.push(matchedSpecial.id);
                         remaining = remaining.substring(matchedSpecial.len);
+                        continue;
+                    }
+                    
+                    // 检查即将到来的文本中是否包含特殊 token（最长匹配优先）
+                    let nextSpecialPos = remaining.length;
+                    let nextSpecial = null;
+                    for (const sp of this._specialMap) {
+                        const pos = remaining.indexOf(sp.content);
+                        if (pos !== -1 && pos < nextSpecialPos) {
+                            nextSpecialPos = pos;
+                            nextSpecial = sp;
+                        }
+                    }
+                    
+                    // 如果下一个特殊 token 前面还有文本，先处理前面的文本
+                    if (nextSpecial && nextSpecialPos > 0) {
+                        let segment = remaining.substring(0, nextSpecialPos);
+                        // 处理 segment 中的 Metaspace 边界
+                        while (segment.length > 0) {
+                            const nextMeta = segment.indexOf('▁', 1);
+                            let piece;
+                            if (nextMeta === -1) {
+                                piece = segment;
+                                segment = '';
+                            } else {
+                                piece = segment.substring(0, nextMeta);
+                                segment = segment.substring(nextMeta);
+                            }
+                            if (piece.length === 0) {
+                                segment = segment.substring(1);
+                                continue;
+                            }
+                            const bpeTokens = this.bpe([...piece]);
+                            for (const bt of bpeTokens) {
+                                const id = this.vocab[bt];
+                                tokens.push(bt);
+                                ids.push(id !== undefined ? id : 0);
+                            }
+                        }
+                        remaining = remaining.substring(nextSpecialPos);
                         continue;
                     }
                     

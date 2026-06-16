@@ -513,25 +513,46 @@
             }
             
             try {
-                const encoded = currentTokenizer.encode(text);
-                tokenCount.textContent = encoded.tokens.length;
-                ratio.textContent = text.length > 0 ? (encoded.tokens.length / text.length).toFixed(2) : '-';
+                // 按换行切割，逐行分词（换行不进 tokenizer）
+                const lines = text.split('\n');
+                const lineResults = [];
+                let totalTokens = 0;
+                
+                for (const line of lines) {
+                    if (line.length === 0) {
+                        lineResults.push({ tokens: [], ids: [] });
+                    } else {
+                        const encoded = currentTokenizer.encode(line);
+                        lineResults.push(encoded);
+                        totalTokens += encoded.tokens.length;
+                    }
+                }
+                
+                tokenCount.textContent = totalTokens;
+                ratio.textContent = text.length > 0 ? (totalTokens / text.length).toFixed(2) : '-';
                 
                 if (activeTab === 'text') {
-                    // 显示带颜色高亮的文本片段
                     let html = '';
-                    for (let i = 0; i < encoded.tokens.length; i++) {
-                        const token = encoded.tokens[i];
-                        // 特殊 token 直接显示原文
-                        let decoded;
-                        const isSpecial = currentTokenizer.specialTokens.some(st => st.content === token);
-                        if (isSpecial) {
-                            decoded = token;
-                        } else {
-                            decoded = currentTokenizer.decodeToken(token);
+                    let globalIdx = 0;
+                    for (let li = 0; li < lineResults.length; li++) {
+                        const encoded = lineResults[li];
+                        for (let i = 0; i < encoded.tokens.length; i++) {
+                            const token = encoded.tokens[i];
+                            let decoded;
+                            const isSpecial = currentTokenizer.specialTokens.some(st => st.content === token);
+                            if (isSpecial) {
+                                decoded = token;
+                            } else {
+                                decoded = currentTokenizer.decodeToken(token);
+                            }
+                            const colorClass = `token-hl-${globalIdx % 10}`;
+                            html += `<span class="token ${colorClass}" data-token="${escapeHtml(token)}" data-id="${encoded.ids[i]}">${escapeHtml(decoded)}</span>`;
+                            globalIdx++;
                         }
-                        const colorClass = `token-hl-${i % 10}`;
-                        html += `<span class="token ${colorClass}" data-token="${escapeHtml(token)}" data-id="${encoded.ids[i]}">${escapeHtml(decoded)}</span>`;
+                        // 每行末尾添加换行（最后一行除外）
+                        if (li < lineResults.length - 1) {
+                            html += '<br>';
+                        }
                     }
                     resultArea.innerHTML = html || '<span style="color:#999">无内容</span>';
                     
@@ -543,8 +564,16 @@
                 } else {
                     // 显示 Token IDs
                     let html = '<div class="token-ids">';
-                    for (let i = 0; i < encoded.tokens.length; i++) {
-                        html += `<span class="token-id-item" style="border-left: 3px solid ${tokenColor(i % 10)}">${encoded.ids[i]}</span>`;
+                    let globalIdx = 0;
+                    for (let li = 0; li < lineResults.length; li++) {
+                        const encoded = lineResults[li];
+                        for (let i = 0; i < encoded.ids.length; i++) {
+                            html += `<span class="token-id-item" style="border-left: 3px solid ${tokenColor(globalIdx % 10)}">${encoded.ids[i]}</span>`;
+                            globalIdx++;
+                        }
+                        if (li < lineResults.length - 1) {
+                            html += '<br>';
+                        }
                     }
                     html += '</div>';
                     resultArea.innerHTML = html;

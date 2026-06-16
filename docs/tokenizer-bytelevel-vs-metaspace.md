@@ -194,18 +194,32 @@ bpe(symbols) {
 |------|----------------|-----------------|-------------------|
 | `bpe()` 返回 | `[符号]` | `[]`（丢弃） | 原样返回未合并的符号 |
 
-> **注意**：`🔤💡` 加上 `▁` 前缀是 3 个符号进入 BPE，走多符号路径。即使 `🔤`/`💡` 不在 vocab 中也不会被丢弃，因为 BPE 的 while 循环 break 后 `return word` 仍返回全部符号。
+> **对 NLLB-200 (Metaspace) 来说，单符号路径不可达。** 因为 `addPrefixSpace=true`，任何输入都会先加上 `▁` 前缀，`bpe()` 至少收到 2 个符号（`['▁', ...]`），永远走多符号路径。因此 NLLB-200 模式下，所有字符 — 即使 vocab 中没有 — 都会被保留在输出中（token 字符串原样，id=0）。
+>
+> ByteLevel 模式下没有前缀，单符号未知时才会触发 `return []`。
 
 ---
 
 ## 七、Python vs Web JS 未知字符处理差异
 
+### NLLB-200 (Metaspace BPE)
+
+因 `addPrefixSpace=true`，`▁` 永远在前，`bpe()` 最少 2 个符号，单符号丢弃路径不可达。
+
+| | Python（HuggingFace 库） | Web JS（`tokenizer_engine.js`） |
+|---|---|---|
+| 未知字符 | 输出 `<unk>` token（id=3） | 保留原始符号字符串，id=0 |
+| `</s>` EOS | 自动追加 | 不追加 |
+| 实际输出 `🔤💡` | `▁ <unk> </s> <unk>` (4 tokens) | `▁ 🔤 💡` (3 tokens) |
+
+### DeepSeek-V4 (ByteLevel BPE)
+
+无前缀 `▁`，单符号路径可达。
+
 | | Python（HuggingFace 库） | Web JS（`tokenizer_engine.js`） |
 |---|---|---|
 | 未知单字符 | 输出 `<unk>` token | `bpe()` 返回 `[]`，符号被丢弃 |
-| 未知多符号 | 输出 `<unk>` token | 保留原始符号，id=0 |
-| `</s>` EOS | 自动追加 | 不追加 |
-| 安全等级 | 安全（标记未知） | 简化（可能静默丢字） |
+| 未知多符号 | 输出 `<unk>` token | 保留原始符号，id=0 | |
 
 Python 版使用 HuggingFace 的 `tokenizers` 库：
 ```python

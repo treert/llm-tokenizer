@@ -6,7 +6,7 @@ Install dependencies:
 
 Usage:
     python scripts/export_tiktoken_tokenizer_json.py
-    python scripts/export_tiktoken_tokenizer_json.py --output tokenizer.json
+    python scripts/export_tiktoken_tokenizer_json.py --output gpt-o200k-base/tokenizer.json
     python scripts/export_tiktoken_tokenizer_json.py --output tokenizer.json --compact
 """
 
@@ -149,6 +149,10 @@ def build_fast_tokenizer_json(encoding_name: str, compact: bool, array_merges: b
     return stringify_merges(tokenizer_json, compact)
 
 
+def default_output_path(encoding_name: str) -> Path:
+    return Path(f"gpt-{encoding_name.replace('_', '-')}") / "tokenizer.json"
+
+
 def parse_args() -> argparse.Namespace:
     available_encodings = list_available_encoding_names()
     parser = argparse.ArgumentParser(
@@ -163,8 +167,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "-o",
         "--output",
-        default="tokenizer.json",
-        help="Output JSON path. Defaults to ./tokenizer.json.",
+        help="Output JSON path. Defaults to ./gpt-{encoding}/tokenizer.json.",
     )
     parser.add_argument(
         "--compact",
@@ -181,7 +184,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    output_path = Path(args.output)
+    output_path = Path(args.output) if args.output else default_output_path(args.encoding)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     output_path.write_text(

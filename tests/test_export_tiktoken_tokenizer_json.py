@@ -28,6 +28,17 @@ class ExportTiktokenTokenizerJsonTest(unittest.TestCase):
         for encoding_name in tiktoken.list_encoding_names():
             self.assertIn(encoding_name, result.stdout)
 
+    def test_default_output_uses_encoding_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            subprocess.run(
+                [sys.executable, str(SCRIPT)],
+                check=True,
+                cwd=tmp_dir,
+            )
+
+            output_path = Path(tmp_dir) / "gpt-o200k-base" / "tokenizer.json"
+            self.assertTrue(output_path.is_file())
+
     def test_exports_standard_fast_tokenizer_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             output_path = Path(tmp_dir) / "tokenizer.json"

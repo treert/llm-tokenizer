@@ -57,12 +57,10 @@ class BPETokenizer {
         this.merges = data.model?.merges || [];
         this.specialTokens = data.added_tokens || [];
         this.byteLevel = (data.decoder?.type === 'ByteLevel');
+        this.ignoreMerges = data.model?.ignore_merges || false;
 
-        // Metaspace 配置（NLLB-200 等 SentencePiece 风格）
-        if (data.pre_tokenizer?.type === 'Metaspace') {
-            this.metaspaceReplacement = data.pre_tokenizer.replacement || '▁';
-            this.addPrefixSpace = data.pre_tokenizer.add_prefix_space || false;
-        }
+        // Parse pre_tokenizer configuration
+        this._parsePreTokenizer(data.pre_tokenizer || {});
 
         // id → token string
         this.idToToken = {};
@@ -74,18 +72,69 @@ class BPETokenizer {
             this.idToToken[st.id] = st.content;
         }
 
-        // merge 优先级表: "a b" → rank (越小越优先)
+        // merge priority table: "a b" → rank (lower = higher priority)
+        // Support both tokenizers v1 (string: "a b") and v2 (array: ["a", "b"]) formats
         this.mergeRank = {};
         for (let i = 0; i < this.merges.length; i++) {
-            this.mergeRank[this.merges[i]] = i;
+            const m = this.merges[i];
+            if (Array.isArray(m)) {
+                // v2 format: ["a", "b"] → key "a b"
+                const key = m[0] + ' ' + m[1];
+                if (!(key in this.mergeRank)) {
+                    this.mergeRank[key] = i;
+                }
+            } else {
+                // v1 format: "a b"
+                this.mergeRank[m] = i;
+            }
         }
 
-        // 预构建特殊 token 排序列表（最长匹配优先）
+        // Pre-build special token sorted list (longest match first)
         this._specialMap = [];
         for (const st of this.specialTokens) {
             this._specialMap.push({ content: st.content, id: st.id, len: st.content.length });
         }
         this._specialMap.sort((a, b) => b.len - a.len);
+    }
+
+    // Parse pre_tokenizer config and build the appropriate regex pattern
+    _parsePreTokenizer(pt) {
+        // Default to GPT-2 style regex (standard ByteLevel BPE)
+        this.pat = new RegExp(
+            "'s|'t|'re|'ve|'m|'ll|'d| ?\\p{L}+| ?\\p{N}+| ?[^\\s\\p{L}\\p{N}]+|\\s+(?!\\S)|\\s+",
+            'gu'
+        );
+
+        if (pt.type === 'Metaspace') {
+            this.metaspaceReplacement = pt.replacement || '▁';
+            this.addPrefixSpace = pt.add_prefix_space || false;
+        } else if (pt.type === 'Sequence') {
+            // Sequence type: multiple pre_tokenizers chained together.
+            // Only use custom regex when the Sequence has exactly one Split step
+            // (e.g., GLM-5.2: [Split(regex), ByteLevel]).
+            // Multi-Split Sequences (e.g., DS-V4: [Split, Split, Split, ByteLevel])
+            // are too complex for JS simulation; fall back to default GPT-2 regex.
+            const ptokList = pt.pretokenizers || [];
+            const splitPtoks = ptokList.filter(s => s.type === 'Split');
+            if (splitPtoks.length === 1 && splitPtoks[0].pattern?.Regex) {
+                try {
+                    this.pat = new RegExp(splitPtoks[0].pattern.Regex, 'gu');
+                } catch (e) {
+                    console.warn('Failed to parse custom pre_tokenizer regex, falling back to default:', e.message);
+                }
+            }
+            // Multiple Split steps → keep default GPT-2 regex (best-effort compatibility)
+        } else if (pt.type === 'Split') {
+            // Direct Split pre_tokenizer (no Sequence)
+            if (pt.pattern?.Regex) {
+                try {
+                    this.pat = new RegExp(pt.pattern.Regex, 'gu');
+                } catch (e) {
+                    console.warn('Failed to parse Split pre_tokenizer regex:', e.message);
+                }
+            }
+        }
+        // For ByteLevel-only or other types, keep default GPT-2 regex
     }
 
     // ---- BPE 核心算法（支持字符串或字符数组输入） ----
@@ -148,17 +197,6 @@ class BPETokenizer {
         return tokenStr.replace(/▁/g, ' ');
     }
 
-    // GPT-2 风格预分词正则（仅 ByteLevel 分词器使用）
-    static get pat() {
-        if (!this._pat) {
-            this._pat = new RegExp(
-                "'s|'t|'re|'ve|'m|'ll|'d| ?\\p{L}+| ?\\p{N}+| ?[^\\s\\p{L}\\p{N}]+|\\s+(?!\\S)|\\s+",
-                'gu'
-            );
-        }
-        return this._pat;
-    }
-
     // 检查并处理特殊 token
     _matchSpecial(remaining) {
         for (const sp of this._specialMap) {
@@ -173,8 +211,8 @@ class BPETokenizer {
     _encodeSegmentByteLevel(segment, tokens, ids) {
         let remaining = segment;
         while (remaining.length > 0) {
-            BPETokenizer.pat.lastIndex = 0;
-            const match = BPETokenizer.pat.exec(remaining);
+            this.pat.lastIndex = 0;
+            const match = this.pat.exec(remaining);
             if (match) {
                 const word = match[0];
                 const wordBytes = new TextEncoder().encode(word);

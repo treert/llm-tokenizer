@@ -10,7 +10,7 @@
 import json
 import sys
 
-model_dirs = sys.argv[1:] if len(sys.argv) > 1 else ['ds-v3', 'ds-v4']
+model_dirs = sys.argv[1:] if len(sys.argv) > 1 else ['ds-v3', 'ds-v4', 'glm-5.2']
 
 for model in model_dirs:
     json_path = f'{model}/tokenizer.json'

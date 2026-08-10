@@ -1,6 +1,7 @@
 # pip3 install transformers tokenizers
 # python3 llm_tokenizer.py --dir ds-v4 "你的字符串"
 # python3 llm_tokenizer.py --dir ds-v3 "你的字符串"
+# python3 llm_tokenizer.py --dir kimi-k3 "你的字符串"
 # python3 llm_tokenizer.py "你的字符串"          # 默认使用 ds-v4
 import sys
 import os

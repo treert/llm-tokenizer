@@ -14,6 +14,18 @@ from tokenizers import Tokenizer
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "export_tiktoken_tokenizer_json.py"
 
+sys.path.insert(0, str(ROOT / "scripts"))
+from export_tiktoken_tokenizer_json import (
+    PATTERNS,
+    build_reference_encoding,
+    load_mergeable_ranks,
+    load_special_tokens,
+)
+
+KIMI_DIR = ROOT / "kimi-k3"
+KIMI_VOCAB = KIMI_DIR / "tiktoken.model"
+KIMI_CONFIG = KIMI_DIR / "tokenizer_config.json"
+
 
 class ExportTiktokenTokenizerJsonTest(unittest.TestCase):
     def test_help_lists_available_encodings(self) -> None:
@@ -90,6 +102,45 @@ class ExportTiktokenTokenizerJsonTest(unittest.TestCase):
             self.assertIsInstance(payload["model"]["merges"][0], list)
             self.assertEqual(len(payload["model"]["merges"][0]), 2)
             self.assertTrue(Tokenizer.from_file(str(output_path)).encode("hello world").ids)
+
+
+@unittest.skipUnless(KIMI_VOCAB.is_file(), "kimi-k3/tiktoken.model 不存在")
+class KimiK3HelpersTest(unittest.TestCase):
+    def test_kimi_k3_pattern_preserved(self) -> None:
+        pattern = PATTERNS["kimi-k3"]
+        self.assertIn(r"[\p{Han}]+", pattern)
+        self.assertIn(r"(?i:'s|'t|'re|'ve|'m|'ll|'d)", pattern)
+        self.assertIn(r"\p{N}{1,3}", pattern)
+        self.assertIn(r"&&[^\p{Han}]", pattern)
+
+    def test_load_special_tokens_from_kimi_config(self) -> None:
+        special = load_special_tokens(str(KIMI_CONFIG), 163584)
+        self.assertEqual(len(special), 256)
+        self.assertEqual(special["[BOS]"], 163584)
+        self.assertEqual(special["[EOS]"], 163585)
+        self.assertEqual(special["<|open|>"], 163587)
+        self.assertEqual(special["<|close|>"], 163588)
+        self.assertEqual(special["<|sep|>"], 163589)
+        self.assertEqual(special["[UNK]"], 163838)
+        self.assertEqual(special["[PAD]"], 163839)
+        # 163600 is a unnamed reserved slot
+        self.assertEqual(special["<|reserved_token_163600|>"], 163600)
+
+    def test_load_special_tokens_without_config(self) -> None:
+        special = load_special_tokens(None, 100, num_reserved=3)
+        self.assertEqual(
+            special,
+            {
+                "<|reserved_token_100|>": 100,
+                "<|reserved_token_101|>": 101,
+                "<|reserved_token_102|>": 102,
+            },
+        )
+
+    def test_load_mergeable_ranks(self) -> None:
+        ranks = load_mergeable_ranks(str(KIMI_VOCAB))
+        self.assertEqual(len(ranks), 163584)
+        self.assertEqual(ranks[b"!"], 0)
 
 
 if __name__ == "__main__":

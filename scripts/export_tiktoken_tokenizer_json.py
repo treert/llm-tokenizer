@@ -43,6 +43,67 @@ def bytes_to_unicode() -> dict[int, str]:
 
 BYTE_ENCODER = bytes_to_unicode()
 
+NUM_RESERVED_SPECIAL_TOKENS = 256
+
+# Matches Kimi-K3 official tokenization_kimi.py pat_str character-by-character
+PATTERNS = {
+    "kimi-k3": "|".join([
+        r"""[\p{Han}]+""",
+        r"""[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}&&[^\p{Han}]]*[\p{Ll}\p{Lm}\p{Lo}\p{M}&&[^\p{Han}]]+(?i:'s|'t|'re|'ve|'m|'ll|'d)?""",
+        r"""[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}&&[^\p{Han}]]+[\p{Ll}\p{Lm}\p{Lo}\p{M}&&[^\p{Han}]]*(?i:'s|'t|'re|'ve|'m|'ll|'d)?""",
+        r"""\p{N}{1,3}""",
+        r""" ?[^\s\p{L}\p{N}]+[\r\n]*""",
+        r"""\s*[\r\n]+""",
+        r"""\s+(?!\S)""",
+        r"""\s+""",
+    ]),
+}
+
+
+def load_mergeable_ranks(vocab_file: str) -> dict[bytes, int]:
+    try:
+        from tiktoken.load import load_tiktoken_bpe
+    except ImportError as exc:
+        raise SystemExit(
+            "Missing dependency. Install with: python -m pip install tiktoken"
+        ) from exc
+    return load_tiktoken_bpe(vocab_file)
+
+
+def load_special_tokens(
+    tokenizer_config_path: str | None,
+    num_base_tokens: int,
+    num_reserved: int = NUM_RESERVED_SPECIAL_TOKENS,
+) -> dict[str, int]:
+    """Generate special token table matching official tokenization_kimi.py rules.
+
+    tokenizer_config.json's added_tokens_decoder provides named tokens,
+    remaining reserved slots are named <|reserved_token_{i}>.
+    """
+    named: dict[int, str] = {}
+    if tokenizer_config_path:
+        config = json.loads(Path(tokenizer_config_path).read_text(encoding="utf-8"))
+        named = {
+            int(token_id): entry["content"]
+            for token_id, entry in config.get("added_tokens_decoder", {}).items()
+        }
+    return {
+        named.get(i, f"<|reserved_token_{i}|>"): i
+        for i in range(num_base_tokens, num_base_tokens + num_reserved)
+    }
+
+
+def build_reference_encoding(mergeable_ranks, pat_str, special_tokens):
+    """Build tiktoken reference Encoding for --verify and test comparisons."""
+    import tiktoken
+
+    return tiktoken.Encoding(
+        name="tiktoken-reference",
+        pat_str=pat_str,
+        mergeable_ranks=mergeable_ranks,
+        special_tokens=special_tokens,
+    )
+
 
 def token_bytes_to_string(token: bytes) -> str:
     return "".join(BYTE_ENCODER[b] for b in token)

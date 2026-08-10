@@ -143,5 +143,38 @@ class KimiK3HelpersTest(unittest.TestCase):
         self.assertEqual(ranks[b"!"], 0)
 
 
+@unittest.skipUnless(KIMI_VOCAB.is_file(), "kimi-k3/tiktoken.model 不存在")
+class ExportKimiK3TokenizerJsonTest(unittest.TestCase):
+    def test_converts_kimi_k3_vocab_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_path = Path(tmp_dir) / "tokenizer.json"
+            subprocess.run(
+                [
+                    sys.executable, str(SCRIPT),
+                    "--vocab-file", str(KIMI_VOCAB),
+                    "--pattern", "kimi-k3",
+                    "--tokenizer-config", str(KIMI_CONFIG),
+                    "--output", str(output_path),
+                ],
+                check=True, cwd=ROOT,
+            )
+
+            payload = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["model"]["type"], "BPE")
+            self.assertEqual(payload["pre_tokenizer"]["type"], "Sequence")
+            self.assertEqual(payload["decoder"]["type"], "ByteLevel")
+
+            vocab_ids = set(payload["model"]["vocab"].values())
+            self.assertEqual(len(vocab_ids), 163840)
+            self.assertEqual(vocab_ids, set(range(163840)))
+
+            added = {t["content"]: t["id"] for t in payload["added_tokens"]}
+            self.assertEqual(added["[BOS]"], 163584)
+            self.assertEqual(added["<|open|>"], 163587)
+
+            tokenizer = Tokenizer.from_file(str(output_path))
+            self.assertTrue(tokenizer.encode("你好世界").ids)
+
+
 if __name__ == "__main__":
     unittest.main()

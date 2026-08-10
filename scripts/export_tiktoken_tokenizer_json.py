@@ -174,7 +174,14 @@ def stringify_merges(tokenizer_json: str, compact: bool) -> str:
     )
 
 
-def build_fast_tokenizer_json(encoding_name: str, compact: bool, array_merges: bool) -> str:
+def build_fast_tokenizer_json(
+    encoding_name: str | None = None,
+    compact: bool = False,
+    array_merges: bool = False,
+    vocab_file: str | None = None,
+    pattern: str | None = None,
+    tokenizer_config: str | None = None,
+) -> str:
     try:
         import tiktoken
         from tokenizers import Regex, Tokenizer, decoders, models, pre_tokenizers
@@ -183,25 +190,34 @@ def build_fast_tokenizer_json(encoding_name: str, compact: bool, array_merges: b
             "Missing dependency. Install with: python -m pip install tiktoken tokenizers"
         ) from exc
 
-    encoding = tiktoken.get_encoding(encoding_name)
+    if vocab_file:
+        mergeable_ranks = load_mergeable_ranks(vocab_file)
+        pat_str = PATTERNS[pattern] if pattern else PATTERNS["kimi-k3"]
+        num_base = len(mergeable_ranks)
+        special_tokens = load_special_tokens(tokenizer_config, num_base)
+    else:
+        encoding = tiktoken.get_encoding(encoding_name)
+        mergeable_ranks = encoding._mergeable_ranks
+        pat_str = encoding._pat_str
+        special_tokens = encoding._special_tokens
 
     vocab = {
         token_bytes_to_string(token): rank
-        for token, rank in sorted(encoding._mergeable_ranks.items(), key=lambda item: item[1])
+        for token, rank in sorted(mergeable_ranks.items(), key=lambda item: item[1])
     }
-    vocab.update(encoding._special_tokens)
+    vocab.update(special_tokens)
     fill_vocab_holes(vocab)
 
-    tokenizer = Tokenizer(models.BPE(vocab=vocab, merges=recover_bpe_merges(encoding._mergeable_ranks)))
+    tokenizer = Tokenizer(models.BPE(vocab=vocab, merges=recover_bpe_merges(mergeable_ranks)))
     tokenizer.pre_tokenizer = pre_tokenizers.Sequence(
         [
-            pre_tokenizers.Split(Regex(encoding._pat_str), behavior="isolated"),
+            pre_tokenizers.Split(Regex(pat_str), behavior="isolated"),
             pre_tokenizers.ByteLevel(add_prefix_space=False, use_regex=False),
         ]
     )
     tokenizer.decoder = decoders.ByteLevel()
     tokenizer.add_special_tokens(
-        [token for token, _ in sorted(encoding._special_tokens.items(), key=lambda item: item[1])]
+        [token for token, _ in sorted(special_tokens.items(), key=lambda item: item[1])]
     )
 
     tokenizer_json = tokenizer.to_str(pretty=not compact)
@@ -222,8 +238,22 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--encoding",
-        default="o200k_base",
-        help="tiktoken encoding name to export. Defaults to o200k_base.",
+        default=None,
+        help="tiktoken encoding name to export (e.g. o200k_base). If not given, defaults to o200k_base.",
+    )
+    parser.add_argument(
+        "--vocab-file",
+        help="Path to a tiktoken.model BPE vocab file (e.g. kimi-k3/tiktoken.model). "
+             "Mutually exclusive with --encoding.",
+    )
+    parser.add_argument(
+        "--pattern",
+        choices=list(PATTERNS.keys()),
+        help="Named pre-tokenization pattern (required with --vocab-file).",
+    )
+    parser.add_argument(
+        "--tokenizer-config",
+        help="Path to tokenizer_config.json for special token names (optional with --vocab-file).",
     )
     parser.add_argument(
         "-o",
@@ -245,14 +275,36 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    output_path = Path(args.output) if args.output else default_output_path(args.encoding)
+
+    if args.vocab_file and args.encoding:
+        raise SystemExit("--vocab-file and --encoding are mutually exclusive.")
+    if args.vocab_file and not args.pattern:
+        raise SystemExit("--pattern is required when using --vocab-file.")
+
+    if args.vocab_file:
+        encoding_label = f"vocab={Path(args.vocab_file).stem} pattern={args.pattern}"
+        encoding_name: str | None = None
+        if not args.output:
+            raise SystemExit("--output is required when using --vocab-file.")
+    else:
+        encoding_name = args.encoding or "o200k_base"
+        encoding_label = encoding_name
+
+    output_path = Path(args.output) if args.output else default_output_path(encoding_name)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     output_path.write_text(
-        build_fast_tokenizer_json(args.encoding, args.compact, args.array_merges),
+        build_fast_tokenizer_json(
+            encoding_name=encoding_name,
+            compact=args.compact,
+            array_merges=args.array_merges,
+            vocab_file=args.vocab_file,
+            pattern=args.pattern,
+            tokenizer_config=args.tokenizer_config,
+        ),
         encoding="utf-8",
     )
-    print(f"Wrote {args.encoding} Fast Tokenizer JSON to {output_path}")
+    print(f"Wrote {encoding_label} Fast Tokenizer JSON to {output_path}")
 
 
 if __name__ == "__main__":

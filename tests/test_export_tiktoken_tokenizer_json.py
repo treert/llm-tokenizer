@@ -175,6 +175,22 @@ class ExportKimiK3TokenizerJsonTest(unittest.TestCase):
             tokenizer = Tokenizer.from_file(str(output_path))
             self.assertTrue(tokenizer.encode("你好世界").ids)
 
+    def test_verify_matches_tiktoken_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_path = Path(tmp_dir) / "tokenizer.json"
+            subprocess.run(
+                [
+                    sys.executable, str(SCRIPT),
+                    "--vocab-file", str(KIMI_VOCAB),
+                    "--pattern", "kimi-k3",
+                    "--tokenizer-config", str(KIMI_CONFIG),
+                    "--output", str(output_path),
+                    "--verify",
+                ],
+                check=True, cwd=ROOT,
+            )
+            # If --verify failed, it would raise CalledProcessError
+
 
 if __name__ == "__main__":
     unittest.main()

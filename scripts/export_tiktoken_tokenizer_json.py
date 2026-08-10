@@ -226,6 +226,51 @@ def build_fast_tokenizer_json(
     return stringify_merges(tokenizer_json, compact)
 
 
+VERIFY_TEXTS = [
+    "你好世界",
+    "今天天气真不错，我们一起去公园散步吧！",
+    "Hello world! 这是中英混排测试。Python3.12发布了。",
+    "def fib(n):\n    return n if n < 2 else fib(n-1) + fib(n-2)",
+    "2024年全球GDP增长3.2%，中国贡献了约30%。",
+    "1234567890",
+    "😀🎉🔥 表情符号测试 emoji test",
+    "   leading spaces\n\ttabs\there\n\nmultiple newlines",
+    "don't can't it's they've I'm you'll",
+    "",
+    "<|open|>literal open tag<|close|> and [BOS] token",
+    "https://kimi.moonshot.cn/chat?q=测试",
+    '{"key": "值", "nested": {"arr": [1, 2, 3]}}',
+]
+
+
+def verify_tokenizer_json(
+    output_path: Path,
+    mergeable_ranks: dict[bytes, int],
+    pat_str: str,
+    special_tokens: dict[str, int],
+) -> None:
+    """Compare generated tokenizer.json against tiktoken reference on test texts."""
+    from tokenizers import Tokenizer
+
+    tokenizer = Tokenizer.from_file(str(output_path))
+    ref = build_reference_encoding(mergeable_ranks, pat_str, special_tokens)
+
+    all_passed = True
+    for text in VERIFY_TEXTS:
+        our_ids = tokenizer.encode(text).ids
+        ref_ids = ref.encode(text, allowed_special="all")
+        if our_ids != ref_ids:
+            all_passed = False
+            print(f"[FAIL] {text!r}")
+            print(f"  ours: {our_ids}")
+            print(f"  ref:  {ref_ids}")
+
+    if all_passed:
+        print(f"[VERIFY OK] All {len(VERIFY_TEXTS)} texts match tiktoken reference.")
+    else:
+        raise SystemExit(1)
+
+
 def default_output_path(encoding_name: str) -> Path:
     return Path(f"gpt-{encoding_name.replace('_', '-')}") / "tokenizer.json"
 
@@ -270,6 +315,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Keep model.merges as two-item arrays instead of the default space-separated strings.",
     )
+    parser.add_argument(
+        "--verify",
+        action="store_true",
+        help="Verify generated tokenizer.json against tiktoken reference (requires --vocab-file).",
+    )
     return parser.parse_args()
 
 
@@ -305,6 +355,15 @@ def main() -> None:
         encoding="utf-8",
     )
     print(f"Wrote {encoding_label} Fast Tokenizer JSON to {output_path}")
+
+    if args.verify:
+        if not args.vocab_file:
+            raise SystemExit("--verify requires --vocab-file.")
+        mergeable_ranks = load_mergeable_ranks(args.vocab_file)
+        pat_str = PATTERNS[args.pattern]
+        num_base = len(mergeable_ranks)
+        special_tokens = load_special_tokens(args.tokenizer_config, num_base)
+        verify_tokenizer_json(output_path, mergeable_ranks, pat_str, special_tokens)
 
 
 if __name__ == "__main__":
